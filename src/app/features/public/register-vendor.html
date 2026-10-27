@@ -1,0 +1,161 @@
+<app-auth-layout
+  heading="Register your repair shop"
+  subheading="Applications are reviewed by our team, usually within one working day."
+  [width]="640"
+>
+  <mat-stepper orientation="vertical" [linear]="true" #stepper>
+    <mat-step [stepControl]="account" label="Owner and account">
+      <form [formGroup]="account" class="form-grid">
+        <mat-form-field>
+          <mat-label>Owner's full name</mat-label>
+          <input matInput formControlName="ownerName" autocomplete="name" />
+          <mat-error>Enter the owner's name.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Shop name</mat-label>
+          <input matInput formControlName="shopName" autocomplete="organization" />
+          <mat-error>Enter the shop name.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Mobile number</mat-label>
+          <input matInput formControlName="phone" inputmode="tel" placeholder="0300 1234567" />
+          <mat-error>Enter a Pakistani mobile number.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Email</mat-label>
+          <input matInput type="email" formControlName="email" autocomplete="email" />
+          <mat-error>Enter a valid email address.</mat-error>
+        </mat-form-field>
+        <mat-form-field class="full">
+          <mat-label>Password</mat-label>
+          <input matInput type="password" formControlName="password" autocomplete="new-password" />
+          <mat-hint>At least 8 characters, with letters and numbers.</mat-hint>
+          <mat-error>Use at least 8 characters, with letters and numbers.</mat-error>
+        </mat-form-field>
+      </form>
+      <div class="actions">
+        <span></span>
+        <button mat-flat-button matStepperNext type="button" (click)="account.markAllAsTouched()">
+          Next
+        </button>
+      </div>
+    </mat-step>
+
+    <mat-step [stepControl]="business" label="Shop and services">
+      <form [formGroup]="business" class="form-grid">
+        <mat-form-field class="full">
+          <mat-label>Shop address</mat-label>
+          <input matInput formControlName="line1" autocomplete="street-address" />
+          <mat-error>Enter the shop's street address.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Shop area</mat-label>
+          <mat-select formControlName="area">
+            @for (a of catalog.value()?.areas ?? []; track a.id) {
+              <mat-option [value]="a.id">{{ a.name }}, {{ a.city }}</mat-option>
+            }
+          </mat-select>
+          <mat-error>Choose an area.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Areas you serve</mat-label>
+          <mat-select formControlName="serviceAreas" multiple>
+            @for (a of catalog.value()?.areas ?? []; track a.id) {
+              <mat-option [value]="a.id">{{ a.name }}, {{ a.city }}</mat-option>
+            }
+          </mat-select>
+          <mat-hint>You'll see jobs whose pickup is in these areas.</mat-hint>
+          <mat-error>Choose at least one area.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Repair specialties</mat-label>
+          <mat-select formControlName="specialties" multiple>
+            @for (c of catalog.value()?.categories ?? []; track c.id) {
+              <mat-option [value]="c.id">{{ c.name }}</mat-option>
+            }
+          </mat-select>
+          <mat-error>Choose at least one specialty.</mat-error>
+        </mat-form-field>
+        <mat-form-field>
+          <mat-label>Phone brands</mat-label>
+          <mat-select formControlName="brands" multiple>
+            @for (b of catalog.value()?.brands ?? []; track b.id) {
+              <mat-option [value]="b.id">{{ b.name }}</mat-option>
+            }
+          </mat-select>
+          <mat-error>Choose at least one brand.</mat-error>
+        </mat-form-field>
+      </form>
+      <div class="actions">
+        <button mat-button matStepperPrevious type="button">Back</button>
+        <button mat-flat-button matStepperNext type="button" (click)="business.markAllAsTouched()">
+          Next
+        </button>
+      </div>
+    </mat-step>
+
+    <mat-step [stepControl]="payout" label="Documents, payouts and terms">
+      <h3>Identity or business documents</h3>
+      <p class="muted small">
+        CNIC (front and back) or business registration. Only our verification team can see these.
+      </p>
+      <app-photo-upload
+        [(ids)]="documents"
+        [max]="3"
+        [pdf]="true"
+        [anonymous]="true"
+        label="Add document"
+      />
+
+      <form [formGroup]="payout">
+        <mat-slide-toggle
+          [checked]="withPayout()"
+          (change)="withPayout.set($event.checked)"
+          class="terms"
+        >
+          Add bank details for payouts now
+        </mat-slide-toggle>
+        @if (withPayout()) {
+          <div class="form-grid">
+            <mat-form-field>
+              <mat-label>Bank name</mat-label>
+              <input matInput formControlName="bankName" />
+              <mat-error>Enter the bank name.</mat-error>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Account title</mat-label>
+              <input matInput formControlName="accountTitle" />
+              <mat-error>Enter the account title.</mat-error>
+            </mat-form-field>
+            <mat-form-field class="full">
+              <mat-label>IBAN</mat-label>
+              <input
+                matInput
+                formControlName="iban"
+                placeholder="PK36SCBL0000001123456702"
+                class="mono"
+              />
+              <mat-error>Enter a 24-character Pakistani IBAN.</mat-error>
+            </mat-form-field>
+          </div>
+        }
+        <mat-checkbox formControlName="acceptTerms" class="terms">
+          I accept the platform terms, commission rates and data-protection policy.
+        </mat-checkbox>
+        @if (payout.controls.acceptTerms.touched && payout.controls.acceptTerms.invalid) {
+          <p class="error-text small">You must accept the terms to continue.</p>
+        }
+      </form>
+      @if (error()) {
+        <p class="callout danger" role="alert"><mat-icon>error</mat-icon>{{ error() }}</p>
+      }
+      <div class="actions">
+        <button mat-button matStepperPrevious type="button">Back</button>
+        <button mat-flat-button type="button" (click)="submit()" [disabled]="busy()">
+          {{ busy() ? 'Submitting…' : 'Submit application' }}
+        </button>
+      </div>
+    </mat-step>
+  </mat-stepper>
+  <p class="links">Already registered? <a routerLink="/login">Sign in</a>.</p>
+</app-auth-layout>

@@ -1,0 +1,472 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Reports</h1>
+      <p>
+        Calculated from live records. Dates are Pakistan time ({{ range().from }} to
+        {{ range().to }}).
+      </p>
+    </div>
+    <button mat-stroked-button type="button" (click)="print()" class="no-print">
+      <mat-icon>print</mat-icon>Print / save PDF
+    </button>
+  </header>
+
+  <div class="range no-print">
+    <mat-button-toggle-group
+      [ngModel]="preset()"
+      (ngModelChange)="setPreset($event)"
+      aria-label="Period"
+    >
+      @for (p of presets; track p.value) {
+        <mat-button-toggle [value]="p.value">{{ p.label }}</mat-button-toggle>
+      }
+      <mat-button-toggle value="custom">Custom</mat-button-toggle>
+    </mat-button-toggle-group>
+    @if (preset() === 'custom') {
+      <mat-form-field subscriptSizing="dynamic">
+        <mat-label>From</mat-label>
+        <input matInput type="date" [ngModel]="from()" (ngModelChange)="from.set($event)" />
+      </mat-form-field>
+      <mat-form-field subscriptSizing="dynamic">
+        <mat-label>To</mat-label>
+        <input matInput type="date" [ngModel]="to()" (ngModelChange)="to.set($event)" />
+      </mat-form-field>
+    }
+  </div>
+
+  <p class="callout small defs">
+    <mat-icon>rule</mat-icon>
+    <span>
+      <strong>Definitions.</strong> Job counts and gross value use jobs <em>created</em> in the
+      period. Collections and refunds use ledger entries <em>dated</em> in the period. Commission
+      and vendor earnings are recognised when a job's money position becomes final (paid, closed,
+      refunded or returned). Outstanding and balances are current.
+    </span>
+  </p>
+
+  @if (!data.hasValue()) {
+    <app-loading />
+  } @else {
+    @let o = op()!;
+    @let f = fin()!;
+    <mat-tab-group animationDuration="0ms">
+      <!-- ================= Operational ================= -->
+      <mat-tab label="Operations">
+        <div class="tab">
+          <div class="kpis">
+            <app-kpi
+              label="Avg time to acceptance"
+              [value]="o.avgAcceptanceHours | hours"
+              icon="handshake"
+            />
+            <app-kpi
+              label="Avg time to pickup"
+              [value]="o.avgPickupHours | hours"
+              icon="two_wheeler"
+              hint="Acceptance → collected"
+            />
+            <app-kpi
+              label="Avg repair turnaround"
+              [value]="o.avgRepairHours | hours"
+              icon="build"
+              hint="At shop → ready"
+            />
+            <app-kpi
+              label="Avg delivery time"
+              [value]="o.avgDeliveryHours | hours"
+              icon="local_shipping"
+              hint="Ready → delivered"
+            />
+            <app-kpi
+              label="Repeat customers"
+              [value]="o.repeatRate | pct"
+              [hint]="o.repeatCustomers + ' of ' + o.customersWithJobs + ' customers'"
+              icon="replay"
+            />
+            <app-kpi
+              label="Average rating"
+              [value]="o.ratingAverage ? o.ratingAverage.toFixed(2) + ' ★' : '—'"
+              icon="star"
+            />
+            <app-kpi
+              label="Complaints"
+              [value]="o.complaints"
+              [hint]="o.disputes + ' disputes'"
+              icon="support_agent"
+            />
+            <app-kpi
+              label="Overdue now"
+              [value]="o.overdue.length"
+              icon="alarm"
+              [alert]="o.overdue.length > 0"
+            />
+          </div>
+
+          <section class="panel">
+            <h2>
+              <span><mat-icon>bar_chart</mat-icon>Repair requests over time</span>
+            </h2>
+            <app-chart [build]="volumeChart()" label="Repair requests per period" [height]="240" />
+          </section>
+
+          <div class="grid-2 mt">
+            @for (sec of sections(); track sec.file) {
+              <section class="panel">
+                <h2>
+                  <span>{{ sec.title }}</span>
+                  <button
+                    mat-button
+                    type="button"
+                    (click)="exportCounts(sec.file, sec.rows, sec.status ? statusLabel : undefined)"
+                  >
+                    <mat-icon>download</mat-icon>CSV
+                  </button>
+                </h2>
+                @if (sec.rows.length) {
+                  <app-chart [build]="sec.build" [label]="sec.title" [height]="sec.height" />
+                  <details>
+                    <summary>Table view</summary>
+                    <div class="table-wrap">
+                      <table class="data">
+                        <thead>
+                          <tr>
+                            <th>Group</th>
+                            <th class="num">Jobs</th>
+                            <th class="num">Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (r of sec.rows; track r.key) {
+                            <tr>
+                              <td>{{ sec.status ? statusLabel(r.key) : r.label }}</td>
+                              <td class="num">{{ r.count }}</td>
+                              <td class="num">{{ r.value | pkr }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                } @else {
+                  <p class="muted">No jobs in this period.</p>
+                }
+              </section>
+            }
+          </div>
+
+          <section class="panel mt">
+            <h2>
+              <span><mat-icon>storefront</mat-icon>Vendor performance</span>
+              <button mat-button type="button" (click)="exportVendors()">
+                <mat-icon>download</mat-icon>CSV
+              </button>
+            </h2>
+            <div class="table-wrap">
+              <table class="data">
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th class="num">Jobs</th>
+                    <th class="num">Acceptance</th>
+                    <th class="num">Completion</th>
+                    <th class="num">Cancellation</th>
+                    <th class="num">Avg repair</th>
+                    <th class="num">On time</th>
+                    <th class="num">Rating</th>
+                    <th class="num">Complaints</th>
+                    <th class="num">Repeat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (v of o.vendors; track v.vendorId) {
+                    <tr>
+                      <td>{{ v.shopName }}</td>
+                      <td class="num">{{ v.jobs }}</td>
+                      <td class="num">{{ v.acceptanceRate | pct }}</td>
+                      <td class="num">{{ v.completionRate | pct }}</td>
+                      <td class="num">{{ v.cancellationRate | pct }}</td>
+                      <td class="num">{{ v.avgRepairHours | hours }}</td>
+                      <td class="num">{{ v.onTimeRate | pct }}</td>
+                      <td class="num">
+                        {{ v.rating ? v.rating.toFixed(1) + ' (' + v.reviews + ')' : '—' }}
+                      </td>
+                      <td class="num">{{ v.complaintRate | pct }}</td>
+                      <td class="num">{{ v.repeatCustomers }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <p class="muted small">
+              Acceptance rate covers admin-assigned offers only; marketplace jobs are accepted by
+              definition. "—" means no qualifying data.
+            </p>
+          </section>
+
+          <div class="grid-2 mt">
+            <section class="panel">
+              <h2>
+                <span><mat-icon>report</mat-icon>Cancellation and failure reasons</span>
+              </h2>
+              @for (r of o.reasons; track r.key) {
+                <div class="row">
+                  <span>{{ r.label }}</span
+                  ><span class="spacer"></span><strong>{{ r.count }}</strong>
+                </div>
+              } @empty {
+                <p class="muted">None in this period.</p>
+              }
+            </section>
+            <section class="panel">
+              <h2>
+                <span><mat-icon>alarm</mat-icon>Overdue jobs</span>
+              </h2>
+              @for (j of o.overdue; track j.id) {
+                <div class="row">
+                  <a class="mono" [routerLink]="['/admin/jobs', j.id]">{{ j.ref }}</a
+                  ><span class="muted small"
+                    >{{ statusLabel(j.status) }} · promised {{ j.promisedAt?.slice(0, 10) }}</span
+                  >
+                </div>
+              } @empty {
+                <p class="muted">Nothing is overdue.</p>
+              }
+            </section>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- ================= Financial ================= -->
+      <mat-tab label="Finance">
+        <div class="tab">
+          <div class="kpis">
+            <app-kpi
+              label="Gross repair value"
+              [value]="f.totals.grossValue | pkr"
+              icon="request_quote"
+            />
+            <app-kpi label="Collected" [value]="f.totals.collected | pkr" icon="payments" />
+            <app-kpi label="Refunds" [value]="f.totals.refunds | pkr" icon="currency_exchange" />
+            <app-kpi
+              label="Net collected"
+              [value]="f.totals.netCollected | pkr"
+              icon="account_balance"
+            />
+            <app-kpi
+              label="Platform commission"
+              [value]="f.totals.commission | pkr"
+              icon="percent"
+              hint="Platform revenue"
+            />
+            <app-kpi
+              label="Vendor earnings"
+              [value]="f.totals.vendorEarnings | pkr"
+              icon="storefront"
+            />
+            <app-kpi label="Discounts given" [value]="f.totals.discounts | pkr" icon="sell" />
+            <app-kpi
+              label="Outstanding now"
+              [value]="f.totals.outstanding | pkr"
+              icon="pending"
+              [alert]="f.totals.outstanding > 0"
+            />
+          </div>
+
+          <section class="panel">
+            <h2>
+              <span><mat-icon>show_chart</mat-icon>Revenue</span>
+              <span>
+                <mat-button-toggle-group
+                  [ngModel]="granularity()"
+                  (ngModelChange)="granularity.set($event)"
+                  aria-label="Group by"
+                  class="no-print"
+                >
+                  <mat-button-toggle value="day">Day</mat-button-toggle>
+                  <mat-button-toggle value="week">Week</mat-button-toggle>
+                  <mat-button-toggle value="month">Month</mat-button-toggle>
+                  <mat-button-toggle value="year">Year</mat-button-toggle>
+                </mat-button-toggle-group>
+                <button mat-button type="button" (click)="exportRevenue()">
+                  <mat-icon>download</mat-icon>CSV
+                </button>
+              </span>
+            </h2>
+            <app-chart
+              [build]="revenueChart()"
+              label="Collected payments, platform commission and refunds over time"
+              [height]="280"
+            />
+            <details>
+              <summary>Table view</summary>
+              <div class="table-wrap">
+                <table class="data">
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th class="num">Collected</th>
+                      <th class="num">Commission</th>
+                      <th class="num">Refunds</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (k of f.keys; track k; let i = $index) {
+                      <tr>
+                        <td>{{ k }}</td>
+                        <td class="num">{{ f.collectedSeries[i] | pkr }}</td>
+                        <td class="num">{{ f.commissionSeries[i] | pkr }}</td>
+                        <td class="num">{{ f.refundSeries[i] | pkr }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </section>
+
+          <div class="grid-2 mt">
+            <section class="panel">
+              <h2>
+                <span><mat-icon>credit_card</mat-icon>Payments by method</span>
+              </h2>
+              @if (f.byMethod.length) {
+                <app-chart
+                  [build]="methodChart()"
+                  label="Collected payments by method"
+                  [height]="180"
+                />
+                <table class="data mt">
+                  <tbody>
+                    @for (m of f.byMethod; track m.method) {
+                      <tr>
+                        <td>{{ m.label }}</td>
+                        <td class="num">{{ m.amount | pkr }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <p class="muted">No payments in this period.</p>
+              }
+            </section>
+            <section class="panel">
+              <h2>
+                <span><mat-icon>category</mat-icon>Repair charges by category</span>
+                <button mat-button type="button" (click)="exportCategories()">
+                  <mat-icon>download</mat-icon>CSV
+                </button>
+              </h2>
+              @if (f.byCategory.length) {
+                <app-chart
+                  [build]="categoryChart()"
+                  label="Repair charges by category"
+                  [height]="Math.max(160, f.byCategory.length * 30 + 40)"
+                />
+                <details>
+                  <summary>Table view</summary>
+                  <div class="table-wrap">
+                    <table class="data">
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th class="num">Parts</th>
+                          <th class="num">Labour</th>
+                          <th class="num">Other</th>
+                          <th class="num">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (c of f.byCategory; track c.name) {
+                          <tr>
+                            <td>{{ c.name }}</td>
+                            <td class="num">{{ c.parts | pkr }}</td>
+                            <td class="num">{{ c.labor | pkr }}</td>
+                            <td class="num">{{ c.other | pkr }}</td>
+                            <td class="num">{{ c.total | pkr }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              } @else {
+                <p class="muted">No billed jobs in this period.</p>
+              }
+            </section>
+          </div>
+
+          <section class="panel mt">
+            <h2>
+              <span
+                ><mat-icon>account_balance_wallet</mat-icon>Vendor earnings and settlements</span
+              >
+              <button mat-button type="button" (click)="exportVendorMoney()">
+                <mat-icon>download</mat-icon>CSV
+              </button>
+            </h2>
+            <div class="table-wrap">
+              <table class="data">
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th class="num">Earned in period</th>
+                    <th class="num">Settled in period</th>
+                    <th class="num">Balance now</th>
+                    <th class="num">Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (v of f.vendors; track v.vendorId) {
+                    <tr>
+                      <td>{{ v.shopName }}</td>
+                      <td class="num">{{ v.earnedInRange | pkr }}</td>
+                      <td class="num">{{ v.settledInRange | pkr }}</td>
+                      <td class="num">{{ v.balance | pkr }}</td>
+                      <td class="num">{{ v.pending | pkr }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="grid-2 mt">
+            <section class="panel">
+              <h2>
+                <span><mat-icon>pending</mat-icon>Outstanding balances</span>
+                <button mat-button type="button" (click)="exportOutstanding()">
+                  <mat-icon>download</mat-icon>CSV
+                </button>
+              </h2>
+              @for (x of f.outstandingJobs; track x.job.id) {
+                <div class="row">
+                  <a class="mono" [routerLink]="['/admin/jobs', x.job.id]">{{ x.job.ref }}</a
+                  ><span class="muted small">{{ statusLabel(x.job.status) }}</span
+                  ><span class="spacer"></span><strong>{{ x.f.outstanding | pkr }}</strong>
+                </div>
+              } @empty {
+                <p class="muted">Nothing outstanding.</p>
+              }
+            </section>
+            <section class="panel">
+              <h2>
+                <span><mat-icon>currency_exchange</mat-icon>Refunds and adjustments</span>
+              </h2>
+              @for (r of f.refunds; track r.id) {
+                <div class="row">
+                  <span>{{ r.at.slice(0, 10) }}</span
+                  ><span class="muted small">{{ r.reason }}</span
+                  ><span class="spacer"></span><strong>{{ r.amount | pkr }}</strong>
+                </div>
+              } @empty {
+                <p class="muted">No refunds in this period.</p>
+              }
+              <p class="muted small">Tax collected in period: {{ f.totals.tax | pkr }}.</p>
+            </section>
+          </div>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  }
+</div>

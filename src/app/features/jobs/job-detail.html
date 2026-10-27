@@ -1,0 +1,977 @@
+<div class="page">
+  <a mat-button [routerLink]="listLink()" class="back no-print"
+    ><mat-icon>arrow_back</mat-icon>Back</a
+  >
+
+  @if (job.error()) {
+    <app-empty
+      icon="search_off"
+      title="Job not found"
+      text="It may not exist, or you don't have access to it."
+    >
+      <a mat-flat-button [routerLink]="listLink()">Back to list</a>
+    </app-empty>
+  } @else if (!job.hasValue()) {
+    <div class="panel"><app-loading /></div>
+  } @else {
+    @let v = job.value()!;
+    @let j = v.job;
+    <header class="page-header">
+      <div>
+        <div class="row">
+          <h1 class="mono">{{ j.ref }}</h1>
+          <app-status [status]="j.status" [audience]="audience()" />
+          @if (j.demo) {
+            <span class="tone neutral" matTooltip="Generated demo record">Demo data</span>
+          }
+          @if (v.access === 'LIMITED') {
+            <span class="tone info">Preview: details shared after acceptance</span>
+          }
+        </div>
+        <p>
+          {{ v.brand }} {{ v.model }} · {{ v.category }} · {{ v.area }} · requested
+          {{ j.createdAt | pkDate }}
+        </p>
+      </div>
+    </header>
+
+    @if (meta(); as m) {
+      @if (!['CANCELLED'].includes(j.status)) {
+        <ol class="stages" aria-label="Progress">
+          @for (s of stages; track s; let i = $index) {
+            <li
+              [class.done]="i < m.stage || (i === m.stage && m.tone === 'success')"
+              [class.now]="i === m.stage && m.tone !== 'success'"
+              [attr.aria-current]="i === m.stage ? 'step' : null"
+            >
+              <span class="bar"></span><span class="label">{{ s }}</span>
+            </li>
+          }
+        </ol>
+      }
+    }
+
+    <div class="split">
+      <div class="stack">
+        <!-- ================= Next step ================= -->
+        <section class="panel next" aria-labelledby="next-h">
+          <h2 id="next-h"><mat-icon>bolt</mat-icon>Next step</h2>
+
+          <!-- Vendor: marketplace preview -->
+          @if (isVendor() && v.access === 'LIMITED') {
+            <p>
+              @if (v.assignment?.state === 'OFFERED') {
+                Operations offered this job to you. Accept it before
+                <strong>{{ v.assignment?.expiresAt | pkDate }}</strong> or it goes back to the
+                queue.
+              } @else {
+                This job is open to every eligible shop. The first shop to accept gets it.
+              }
+            </p>
+            <div class="row">
+              <button mat-flat-button type="button" (click)="accept()" [disabled]="busy()">
+                <mat-icon>handshake</mat-icon>Accept job
+              </button>
+              @if (v.assignment?.state === 'OFFERED') {
+                <button mat-stroked-button type="button" (click)="decline()" [disabled]="busy()">
+                  Decline
+                </button>
+              }
+            </div>
+          }
+
+          <!-- Customer -->
+          @if (isCustomer()) {
+            @switch (j.status) {
+              @case ('AWAITING_VENDOR') {
+                <p>
+                  We've sent your request to verified shops near you. You'll be notified when one
+                  accepts.
+                </p>
+              }
+              @case ('SUBMITTED') {
+                <p>Our operations team is choosing the best shop for your repair.</p>
+              }
+              @case ('VENDOR_ACCEPTED') {
+                <p>
+                  {{ v.vendor?.shopName }} accepted your request and will schedule the pickup
+                  shortly.
+                </p>
+              }
+              @case ('AWAITING_APPROVAL') {
+                <p class="callout warning">
+                  <mat-icon>pending_actions</mat-icon
+                  ><span
+                    >The shop sent a quotation. Review it below and approve or reject it. No repair
+                    work starts until you approve.</span
+                  >
+                </p>
+              }
+              @case ('QUOTATION_REJECTED') {
+                <p>You rejected the quotation. The shop will return your phone.</p>
+              }
+              @case ('UNREPAIRABLE') {
+                <p>The shop found the phone can't be repaired. It will be returned to you.</p>
+              }
+              @case ('PAID') {
+                <p>Paid in full. Thank you!</p>
+              }
+              @case ('CLOSED') {
+                <p>This repair is complete.</p>
+              }
+              @case ('CANCELLED') {
+                <p>This request was cancelled: {{ j.cancelReason }}</p>
+              }
+              @case ('DISPUTED') {
+                <p>
+                  Your dispute is with our support team. Follow it under
+                  <a routerLink="/customer/support">Support</a>.
+                </p>
+              }
+              @case ('REFUNDED') {
+                <p>Your refund has been processed.</p>
+              }
+              @default {
+                <p>{{ meta()?.label }}. We'll notify you at every step.</p>
+              }
+            }
+
+            @if (activeTask(); as task) {
+              <div class="handover">
+                <div>
+                  <strong
+                    >{{ task.kind === 'PICKUP' ? 'Pickup' : 'Delivery' }}: {{ task.scheduledDate }},
+                    {{ task.window }}</strong
+                  >
+                  <p class="muted small">
+                    Give your handover code to the courier when they
+                    {{ task.kind === 'PICKUP' ? 'collect' : 'return' }} the phone. Don't share it
+                    before.
+                  </p>
+                </div>
+                @if (handoverCode(); as hc) {
+                  <div class="code" aria-live="polite">
+                    <span class="mono">{{ hc.code }}</span>
+                    <span class="muted small"
+                      >Valid until {{ hc.expiresAt | pkDate: 'time' }}. Generating a new code
+                      replaces this one.</span
+                    >
+                  </div>
+                } @else {
+                  <button mat-flat-button type="button" (click)="showCode()" [disabled]="busy()">
+                    <mat-icon>pin</mat-icon>Show handover code
+                  </button>
+                }
+              </div>
+            }
+
+            @if (payable() && j.status !== 'OUT_FOR_DELIVERY') {
+              <div class="pay">
+                <h3>Pay {{ outstanding() | pkr }}</h3>
+                <p class="muted small">
+                  Pay the courier or shop in cash, or transfer to Repair Hub (Meezan Bank, IBAN PK00
+                  MEZN 0000 0000 0000 0000) and enter the reference below.
+                </p>
+                @if (settings.value()?.enabledPaymentMethods?.includes('BANK_TRANSFER')) {
+                  <app-payment-form
+                    [methods]="['BANK_TRANSFER']"
+                    [outstanding]="outstanding()"
+                    [needsReference]="true"
+                    submitLabel="I've made the transfer"
+                    [busy]="busy()"
+                    (submitted)="reportTransfer($event)"
+                  />
+                }
+                @if (!settings.value()?.onlineGateway?.configured) {
+                  <p class="muted small">Online card payments are not available yet.</p>
+                }
+              </div>
+            }
+            @if (pendingTransfers().length) {
+              <p class="callout">
+                <mat-icon>schedule</mat-icon
+                ><span
+                  >Your transfer of {{ pendingTransfers()[0].amount | pkr }} is waiting for
+                  confirmation.</span
+                >
+              </p>
+            }
+
+            @if (v.canReview) {
+              <div class="review-form">
+                <h3>How was your repair?</h3>
+                <div class="stars" role="radiogroup" aria-label="Rating">
+                  @for (n of [1, 2, 3, 4, 5]; track n) {
+                    <button
+                      type="button"
+                      role="radio"
+                      [attr.aria-checked]="reviewRating() === n"
+                      [attr.aria-label]="n + ' stars'"
+                      (click)="reviewRating.set(n)"
+                      [class.on]="n <= reviewRating()"
+                    >
+                      <mat-icon>star</mat-icon>
+                    </button>
+                  }
+                </div>
+                <mat-form-field class="full-width" subscriptSizing="dynamic">
+                  <mat-label>Tell others about your experience (optional)</mat-label>
+                  <textarea
+                    matInput
+                    rows="2"
+                    [(ngModel)]="reviewComment"
+                    maxlength="800"
+                  ></textarea>
+                </mat-form-field>
+                <button
+                  mat-flat-button
+                  type="button"
+                  (click)="review()"
+                  [disabled]="!reviewRating() || busy()"
+                >
+                  Submit review
+                </button>
+              </div>
+            }
+
+            <div class="row secondary">
+              @if (canCustomerCancel()) {
+                <button mat-stroked-button type="button" (click)="cancel()" [disabled]="busy()">
+                  <mat-icon>cancel</mat-icon>Cancel request
+                </button>
+              }
+              @if (canDispute()) {
+                <button mat-stroked-button type="button" (click)="dispute()" [disabled]="busy()">
+                  <mat-icon>gavel</mat-icon>Raise a dispute
+                </button>
+              }
+              @if (v.invoice) {
+                <a mat-stroked-button [routerLink]="['/receipt', j.id]"
+                  ><mat-icon>receipt_long</mat-icon>Receipt</a
+                >
+              }
+            </div>
+          }
+
+          <!-- Vendor, agent and admin actions on the job -->
+          @if (!isCustomer() && v.access === 'FULL') {
+            @if (actions().length) {
+              <div class="row">
+                @for (a of actions(); track a.to) {
+                  <button
+                    mat-flat-button
+                    type="button"
+                    (click)="fire(a)"
+                    [disabled]="busy()"
+                    [class.warn]="a.needsNote"
+                  >
+                    {{ a.label }}
+                  </button>
+                }
+              </div>
+            }
+
+            @if (canSchedulePickup()) {
+              <h3>
+                {{ j.status === 'PICKUP_SCHEDULED' ? 'Reschedule pickup' : 'Schedule pickup' }}
+              </h3>
+              <app-schedule-form
+                [agents]="agents.value() ?? []"
+                [defaultDate]="j.preferredPickupDate"
+                [defaultWindow]="j.preferredPickupWindow"
+                [fee]="settings.value()?.defaultPickupFee ?? 0"
+                submitLabel="Schedule pickup"
+                [cancellable]="reschedule()"
+                [busy]="busy()"
+                (submitted)="schedulePickup($event)"
+                (cancelled)="reschedule.set(false)"
+              />
+            }
+
+            @if (j.status === 'PICKUP_IN_PROGRESS' && myTask()) {
+              <h3>Confirm collection</h3>
+              <app-handover-form mode="pickup" [busy]="busy()" (submitted)="collect($event)" />
+            }
+
+            @if (j.status === 'INSPECTION_IN_PROGRESS' && isVendor()) {
+              <p>
+                Inspect the phone, then send an itemised quotation. You can't start chargeable work
+                until the customer approves it.
+              </p>
+            }
+
+            @if (canQuote() && settings.value(); as s) {
+              <h3>
+                {{
+                  revising() ? 'Revised quotation (additional charges)' : 'Inspection and quotation'
+                }}
+              </h3>
+              <app-quotation-form
+                [settings]="s"
+                [previous]="revising() ? latestApproved()?.items : undefined"
+                [revision]="revising()"
+                [busy]="busy()"
+                (submitted)="submitQuote($event)"
+                (cancelled)="revising.set(false)"
+              />
+              @if (!revising()) {
+                <button mat-button type="button" class="warn-text" (click)="unrepairable()">
+                  <mat-icon>heart_broken</mat-icon>It can't be repaired
+                </button>
+              }
+            }
+
+            @if (inRepair() && !revising()) {
+              <button mat-stroked-button type="button" (click)="revising.set(true)">
+                <mat-icon>request_quote</mat-icon>Found more damage? Send a revised quotation
+              </button>
+            }
+
+            @if (canScheduleDelivery()) {
+              <h3>{{ j.outcome === 'NOT_REPAIRED' ? 'Return the phone' : 'Schedule delivery' }}</h3>
+              <app-schedule-form
+                [agents]="agents.value() ?? []"
+                [fee]="settings.value()?.defaultDeliveryFee ?? 0"
+                submitLabel="Schedule delivery"
+                [cancellable]="reschedule()"
+                [busy]="busy()"
+                (submitted)="scheduleDelivery($event)"
+                (cancelled)="reschedule.set(false)"
+              />
+            }
+
+            @if (
+              (j.status === 'PICKUP_SCHEDULED' || j.status === 'READY_FOR_DELIVERY') &&
+              !reschedule() &&
+              (isVendor() || session.can('deliveries.manage'))
+            ) {
+              <button mat-button type="button" (click)="reschedule.set(true)">
+                <mat-icon>event_repeat</mat-icon>Reschedule
+              </button>
+            }
+
+            @if (j.status === 'OUT_FOR_DELIVERY' && myTask()) {
+              <h3>Confirm delivery</h3>
+              @if (outstanding() > 0) {
+                <p class="callout warning">
+                  <mat-icon>payments</mat-icon
+                  ><span
+                    >Collect {{ outstanding() | pkr }} from the customer and record it after
+                    delivery.</span
+                  >
+                </p>
+              }
+              <app-handover-form mode="delivery" [busy]="busy()" (submitted)="deliver($event)" />
+            }
+
+            @if (
+              payable() &&
+              j.status !== 'OUT_FOR_DELIVERY' &&
+              (isVendor() || isAgent()) &&
+              courierMethods().length
+            ) {
+              <h3>Record payment received</h3>
+              <app-payment-form
+                [methods]="courierMethods()"
+                [outstanding]="outstanding()"
+                [busy]="busy()"
+                (submitted)="recordPayment($event)"
+              />
+            }
+
+            @if (j.status === 'PAID' && isVendor()) {
+              <button mat-flat-button type="button" (click)="close()" [disabled]="busy()">
+                <mat-icon>check_circle</mat-icon>Close job
+              </button>
+            }
+
+            <!-- Admin tools -->
+            @if (isAdmin()) {
+              <div class="admin-tools">
+                @if (canAssign()) {
+                  <button mat-flat-button type="button" (click)="assign()">
+                    <mat-icon>person_add</mat-icon
+                    >{{ j.vendorId || v.assignment ? 'Reassign vendor' : 'Assign vendor' }}
+                  </button>
+                }
+                @if (
+                  j.status === 'SUBMITTED' &&
+                  settings.value()?.assignmentMode === 'FIRST_ACCEPT' &&
+                  session.can('jobs.assign')
+                ) {
+                  <button mat-stroked-button type="button" (click)="publish()" [disabled]="busy()">
+                    <mat-icon>campaign</mat-icon>Publish to vendors
+                  </button>
+                }
+                @if (canAdminCancel()) {
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="adminCancel()"
+                    [disabled]="busy()"
+                  >
+                    <mat-icon>cancel</mat-icon>Cancel job
+                  </button>
+                }
+                @if (
+                  (j.status === 'DISPUTED' || j.status === 'REFUNDED') && session.can('jobs.assign')
+                ) {
+                  <button mat-flat-button type="button" (click)="close()" [disabled]="busy()">
+                    <mat-icon>gavel</mat-icon
+                    >{{ j.status === 'DISPUTED' ? 'Resolve and close' : 'Close job' }}
+                  </button>
+                }
+                @if (
+                  refundable() > 0 &&
+                  session.can('refunds.issue') &&
+                  ['PAID', 'CLOSED', 'DISPUTED', 'RETURNED_WITHOUT_REPAIR', 'DELIVERED'].includes(
+                    j.status
+                  )
+                ) {
+                  <button mat-stroked-button type="button" (click)="refund()" [disabled]="busy()">
+                    <mat-icon>currency_exchange</mat-icon>Refund
+                  </button>
+                }
+              </div>
+              @for (t of pendingTransfers(); track t.id) {
+                @if (session.can('payments.verify')) {
+                  <div class="callout warning verify">
+                    <mat-icon>account_balance</mat-icon>
+                    <span
+                      >Customer reported a bank transfer of {{ t.amount | pkr }} (ref
+                      {{ t.reference }}). Check the bank statement before confirming.</span
+                    >
+                    <button
+                      mat-flat-button
+                      type="button"
+                      (click)="verify(t.id)"
+                      [disabled]="busy()"
+                    >
+                      Confirm received
+                    </button>
+                  </div>
+                }
+              }
+              @if (payable() && session.can('payments.verify') && !pendingTransfers().length) {
+                <h3>Record a bank transfer</h3>
+                <app-payment-form
+                  [methods]="['BANK_TRANSFER']"
+                  [outstanding]="outstanding()"
+                  [needsReference]="true"
+                  submitLabel="Record transfer"
+                  [busy]="busy()"
+                  (submitted)="adminPayment($event)"
+                />
+              }
+            }
+
+            @if (
+              !actions().length &&
+              !canSchedulePickup() &&
+              !canScheduleDelivery() &&
+              !canQuote() &&
+              !(j.status === 'PICKUP_IN_PROGRESS' && myTask()) &&
+              !(j.status === 'OUT_FOR_DELIVERY' && myTask()) &&
+              !payable() &&
+              !isAdmin()
+            ) {
+              <p class="muted">
+                @if (j.status === 'AWAITING_APPROVAL') {
+                  Waiting for the customer to approve the quotation.
+                } @else if (activeTask() && !myTask()) {
+                  {{ activeTask()!.kind === 'PICKUP' ? 'Pickup' : 'Delivery' }} is assigned to
+                  {{ v.agent?.name ?? 'the shop' }}.
+                } @else {
+                  Nothing to do right now.
+                }
+              </p>
+            }
+          }
+        </section>
+
+        <!-- ================= Quotations ================= -->
+        @if (v.quotations.length) {
+          <section class="panel" aria-labelledby="q-h">
+            <h2 id="q-h"><mat-icon>request_quote</mat-icon>Quotations</h2>
+            @for (q of v.quotations; track q.id) {
+              @let t = totals(q);
+              <article
+                class="quote"
+                [class.pending]="q.status === 'PENDING'"
+                [class.old]="q.status === 'SUPERSEDED' || q.status === 'REJECTED'"
+              >
+                <header class="row">
+                  <strong>Version {{ q.version }}</strong>
+                  <span
+                    class="tone"
+                    [class]="
+                      q.status === 'APPROVED'
+                        ? 'success'
+                        : q.status === 'PENDING'
+                          ? 'warning'
+                          : q.status === 'REJECTED'
+                            ? 'danger'
+                            : 'neutral'
+                    "
+                    >{{ q.status.toLowerCase() }}</span
+                  >
+                  <span class="spacer"></span>
+                  <span class="muted small">{{ q.createdAt | pkDate }}</span>
+                </header>
+                <div class="table-wrap">
+                  <table class="data">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th class="num">Qty</th>
+                        <th class="num">Price</th>
+                        <th class="num">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (i of q.items; track $index) {
+                        <tr>
+                          <td>
+                            {{ i.description }}
+                            <span class="muted small">· {{ i.type.toLowerCase() }}</span>
+                          </td>
+                          <td class="num">{{ i.quantity }}</td>
+                          <td class="num">{{ i.unitPrice | pkr }}</td>
+                          <td class="num">{{ i.quantity * i.unitPrice | pkr }}</td>
+                        </tr>
+                      }
+                      @if (q.discount) {
+                        <tr>
+                          <td colspan="3">Discount</td>
+                          <td class="num">−{{ q.discount | pkr }}</td>
+                        </tr>
+                      }
+                      @if (t.tax) {
+                        <tr>
+                          <td colspan="3">Tax ({{ q.taxRatePct }}%)</td>
+                          <td class="num">{{ t.tax | pkr }}</td>
+                        </tr>
+                      }
+                      <tr class="total">
+                        <td colspan="3"><strong>Total</strong></td>
+                        <td class="num">
+                          <strong>{{ t.total | pkr }}</strong>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="muted small">
+                  Ready by {{ q.estimatedCompletion | pkDate: 'date' }} ·
+                  {{ q.warrantyDays ? q.warrantyDays + '-day warranty' : 'No warranty' }}
+                  @if (q.notes) {
+                    · {{ q.notes }}
+                  }
+                  @if (q.responseNote) {
+                    <br />Customer: “{{ q.responseNote }}”
+                  }
+                </p>
+                @if (isCustomer() && q.status === 'PENDING' && j.status === 'AWAITING_APPROVAL') {
+                  @if (q.version > 1) {
+                    <p class="callout warning">
+                      <mat-icon>info</mat-icon
+                      ><span
+                        >The shop found more work is needed. This replaces your earlier approval;
+                        rejecting it stops the repair and the phone is returned.</span
+                      >
+                    </p>
+                  }
+                  <div class="row">
+                    <button
+                      mat-flat-button
+                      type="button"
+                      (click)="respond(q, true)"
+                      [disabled]="busy()"
+                    >
+                      <mat-icon>thumb_up</mat-icon>Approve {{ t.total | pkr }}
+                    </button>
+                    <button
+                      mat-stroked-button
+                      type="button"
+                      (click)="respond(q, false)"
+                      [disabled]="busy()"
+                    >
+                      <mat-icon>thumb_down</mat-icon>Reject
+                    </button>
+                  </div>
+                }
+              </article>
+            }
+          </section>
+        }
+
+        <!-- ================= Workshop ================= -->
+        @if (
+          v.inspection || v.conditions.length || v.parts.length || v.workLogs.length || inWorkshop()
+        ) {
+          <section class="panel" aria-labelledby="w-h">
+            <h2 id="w-h"><mat-icon>build</mat-icon>Device and workshop</h2>
+            @for (c of v.conditions; track c.id) {
+              <div class="block">
+                <h3>
+                  Condition at {{ c.stage.toLowerCase() }}
+                  <span class="muted small">· {{ c.at | pkDate }}</span>
+                </h3>
+                <dl class="facts">
+                  <dt>Condition</dt>
+                  <dd>
+                    {{ c.physicalCondition.toLowerCase()
+                    }}{{ c.powersOn ? ', powers on' : ', does not power on' }}
+                  </dd>
+                  <dt>Existing damage</dt>
+                  <dd>{{ c.existingDamage || 'None recorded' }}</dd>
+                  <dt>Accessories</dt>
+                  <dd>{{ c.accessories.length ? c.accessories.join(', ') : 'None' }}</dd>
+                  @if (c.imei) {
+                    <dt>IMEI</dt>
+                    <dd class="mono">{{ c.imei }}</dd>
+                  }
+                </dl>
+                @if (c.photoIds.length) {
+                  <div class="thumbs">
+                    @for (f of c.photoIds; track f) {
+                      <app-file-thumb [id]="f" />
+                    }
+                  </div>
+                }
+              </div>
+            }
+            @if (v.inspection; as i) {
+              <div class="block">
+                <h3>
+                  Inspection <span class="muted small">· {{ i.at | pkDate }}</span>
+                </h3>
+                <dl class="facts">
+                  <dt>Findings</dt>
+                  <dd>{{ i.findings }}</dd>
+                  <dt>{{ i.repairable ? 'Proposed repair' : 'Outcome' }}</dt>
+                  <dd>{{ i.repairable ? i.proposedRepair : 'Cannot be repaired' }}</dd>
+                </dl>
+              </div>
+            }
+            @if (v.parts.length && !isCustomer()) {
+              <div class="block">
+                <h3>Parts used</h3>
+                <ul class="plain-list">
+                  @for (p of v.parts; track p.id) {
+                    <li>
+                      {{ p.quantity }} × {{ p.partName }}
+                      @if (p.partNumber) {
+                        <span class="mono small">({{ p.partNumber }})</span>
+                      }
+                      · cost {{ p.unitCost | pkr }}
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+            @if (v.workLogs.length) {
+              <div class="block">
+                <h3>Repair notes</h3>
+                <ul class="plain-list logs">
+                  @for (w of v.workLogs; track w.id) {
+                    <li>
+                      <span
+                        class="tone"
+                        [class]="
+                          w.kind === 'DELAY'
+                            ? 'warning'
+                            : w.kind === 'AFTER'
+                              ? 'success'
+                              : 'neutral'
+                        "
+                        >{{ w.kind === 'NOTE' ? 'note' : w.kind.toLowerCase() }}</span
+                      >
+                      {{ w.note }} <span class="muted small">· {{ w.at | pkDate }}</span>
+                      @if (w.fileIds.length) {
+                        <div class="thumbs">
+                          @for (f of w.fileIds; track f) {
+                            <app-file-thumb [id]="f" />
+                          }
+                        </div>
+                      }
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+            @if (inWorkshop()) {
+              <mat-accordion>
+                <mat-expansion-panel>
+                  <mat-expansion-panel-header
+                    ><mat-panel-title
+                      >Add a note or before/after photos</mat-panel-title
+                    ></mat-expansion-panel-header
+                  >
+                  <div class="form-grid">
+                    <mat-form-field>
+                      <mat-label>Type</mat-label>
+                      <mat-select [(ngModel)]="logKind">
+                        <mat-option value="NOTE">Note</mat-option>
+                        <mat-option value="BEFORE">Before repair</mat-option>
+                        <mat-option value="AFTER">After repair</mat-option>
+                        <mat-option value="DELAY">Delay (customer is notified)</mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                    <mat-form-field>
+                      <mat-label>Note</mat-label>
+                      <input matInput [(ngModel)]="logNote" maxlength="1000" />
+                    </mat-form-field>
+                  </div>
+                  <app-photo-upload [(ids)]="logPhotos" [max]="4" label="Evidence photo" />
+                  <button
+                    mat-flat-button
+                    type="button"
+                    class="mt"
+                    (click)="addLog()"
+                    [disabled]="busy() || logNote.trim().length < 2"
+                  >
+                    Add note
+                  </button>
+                </mat-expansion-panel>
+                @if (inRepair()) {
+                  <mat-expansion-panel>
+                    <mat-expansion-panel-header
+                      ><mat-panel-title
+                        >Record a replacement part</mat-panel-title
+                      ></mat-expansion-panel-header
+                    >
+                    <div class="form-grid">
+                      <mat-form-field
+                        ><mat-label>Part name</mat-label
+                        ><input matInput [(ngModel)]="part.partName"
+                      /></mat-form-field>
+                      <mat-form-field
+                        ><mat-label>Part number (optional)</mat-label
+                        ><input matInput [(ngModel)]="part.partNumber"
+                      /></mat-form-field>
+                      <mat-form-field
+                        ><mat-label>Quantity</mat-label
+                        ><input matInput type="number" min="1" [(ngModel)]="part.quantity"
+                      /></mat-form-field>
+                      <mat-form-field
+                        ><mat-label>Unit cost to you (Rs)</mat-label
+                        ><input matInput type="number" min="0" [(ngModel)]="part.unitCost"
+                      /></mat-form-field>
+                    </div>
+                    <button
+                      mat-flat-button
+                      type="button"
+                      (click)="addPart()"
+                      [disabled]="busy() || part.partName.trim().length < 2"
+                    >
+                      Record part
+                    </button>
+                  </mat-expansion-panel>
+                }
+              </mat-accordion>
+            }
+          </section>
+        }
+
+        <!-- ================= Timeline ================= -->
+        @if (v.history.length) {
+          <section class="panel" aria-labelledby="t-h">
+            <h2 id="t-h"><mat-icon>timeline</mat-icon>Status history</h2>
+            <app-timeline [history]="v.history" [audience]="audience()" />
+          </section>
+        }
+      </div>
+
+      <!-- ================= Sidebar ================= -->
+      <aside class="stack">
+        <section class="panel" aria-labelledby="f-h">
+          <h2 id="f-h"><mat-icon>receipt_long</mat-icon>Charges</h2>
+          @if (v.financials.total || v.financials.paid) {
+            <app-financials [data]="v.financials" [showSplit]="!isCustomer() && !isAgent()" />
+          } @else {
+            <p class="muted">No charges yet. You'll see an itemised quote after inspection.</p>
+            @if (j.diagnosticConsent && j.diagnosticFee) {
+              <p class="muted small">
+                If the phone isn't repaired, a diagnostic fee of
+                {{ j.diagnosticFee | pkr }} applies.
+              </p>
+            }
+          }
+          @if (v.transactions.length) {
+            <h3>Payments</h3>
+            <ul class="plain-list">
+              @for (t of v.transactions; track t.id) {
+                <li class="tx">
+                  <span>{{ t.kind === 'REFUND' ? 'Refund' : methodLabel[t.method] }}</span>
+                  <span class="num">{{ t.kind === 'REFUND' ? '−' : '' }}{{ t.amount | pkr }}</span>
+                  <span class="muted small full"
+                    >{{ t.at | pkDate
+                    }}{{ t.status === 'PENDING_VERIFICATION' ? ' · awaiting confirmation' : ''
+                    }}{{ t.reason ? ' · ' + t.reason : '' }}</span
+                  >
+                </li>
+              }
+            </ul>
+          }
+          @if (v.invoice && !isCustomer()) {
+            <a mat-stroked-button [routerLink]="['/receipt', j.id]" class="mt"
+              ><mat-icon>print</mat-icon>Receipt {{ v.invoice.number }}</a
+            >
+          }
+        </section>
+
+        <section class="panel" aria-labelledby="d-h">
+          <h2 id="d-h"><mat-icon>smartphone</mat-icon>Repair request</h2>
+          <dl class="facts">
+            <dt>Device</dt>
+            <dd>{{ v.brand }} {{ v.model }}</dd>
+            <dt>Problem</dt>
+            <dd>{{ v.category }}</dd>
+            <dt>Description</dt>
+            <dd>{{ j.description }}</dd>
+            <dt>Preferred pickup</dt>
+            <dd>{{ j.preferredPickupDate }}, {{ j.preferredPickupWindow }}</dd>
+            <dt>Diagnostic</dt>
+            <dd>
+              {{
+                j.diagnosticConsent
+                  ? 'Customer agreed to a diagnostic fee of Rs ' + j.diagnosticFee
+                  : 'No diagnostic fee agreed'
+              }}
+            </dd>
+            @if (j.promisedAt) {
+              <dt>Promised by</dt>
+              <dd>{{ j.promisedAt | pkDate: 'date' }}</dd>
+            }
+          </dl>
+          @if (j.photoIds.length) {
+            <div class="thumbs mt">
+              @for (f of j.photoIds; track f) {
+                <app-file-thumb [id]="f" />
+              }
+            </div>
+          }
+        </section>
+
+        @if (v.access === 'FULL') {
+          <section class="panel" aria-labelledby="p-h">
+            <h2 id="p-h"><mat-icon>group</mat-icon>People and places</h2>
+            <dl class="facts">
+              @if (v.customer && !isCustomer()) {
+                <dt>Customer</dt>
+                <dd>
+                  {{ v.customer.name }}<br /><a [href]="'tel:' + v.customer.phone">{{
+                    v.customer.phone
+                  }}</a>
+                </dd>
+              }
+              @if (v.vendor; as shop) {
+                <dt>Repair shop</dt>
+                <dd>
+                  {{ shop.shopName }}, {{ shop.areaName }}<br />
+                  <span class="muted small"
+                    >{{
+                      shop.rating
+                        ? shop.rating + '★ from ' + shop.reviewCount + ' reviews'
+                        : 'No reviews yet'
+                    }}
+                    · {{ shop.completedJobs }} repairs</span
+                  >
+                  @if (v.vendorPhone) {
+                    <br /><a [href]="'tel:' + v.vendorPhone">{{ v.vendorPhone }}</a>
+                  }
+                </dd>
+              }
+              @if (v.agent) {
+                <dt>Courier</dt>
+                <dd>{{ v.agent.name }}</dd>
+              }
+              <dt>Pickup</dt>
+              <dd>
+                {{ j.pickupAddress.line1 }}, {{ v.area }}, {{ j.pickupAddress.city
+                }}{{ j.pickupAddress.landmark ? ' (' + j.pickupAddress.landmark + ')' : '' }}
+              </dd>
+              <dt>Delivery</dt>
+              <dd>{{ j.deliveryAddress.line1 }}, {{ j.deliveryAddress.city }}</dd>
+            </dl>
+          </section>
+        }
+
+        @if (v.tasks.length) {
+          <section class="panel" aria-labelledby="k-h">
+            <h2 id="k-h"><mat-icon>local_shipping</mat-icon>Pickup and delivery</h2>
+            <ul class="plain-list tasks">
+              @for (t of v.tasks; track t.id) {
+                <li>
+                  <div class="row">
+                    <strong>{{ t.kind === 'PICKUP' ? 'Pickup' : 'Delivery' }}</strong>
+                    <span
+                      class="tone"
+                      [class]="
+                        t.status === 'COMPLETED'
+                          ? 'success'
+                          : t.status === 'FAILED'
+                            ? 'danger'
+                            : t.status === 'IN_PROGRESS'
+                              ? 'progress'
+                              : 'neutral'
+                      "
+                      >{{ t.status.toLowerCase().replace('_', ' ') }}</span
+                    >
+                  </div>
+                  <span class="muted small">
+                    {{ t.scheduledDate }}, {{ t.window }}
+                    @if (t.completedAt) {
+                      · done {{ t.completedAt | pkDate }}
+                    }
+                    @if (t.failureReason) {
+                      · {{ t.failureReason }}
+                    }
+                  </span>
+                  @if (t.evidenceIds.length) {
+                    <div class="thumbs">
+                      @for (f of t.evidenceIds; track f) {
+                        <app-file-thumb [id]="f" />
+                      }
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+            <p class="muted small">
+              Live GPS tracking is not available; status updates come from the courier.
+            </p>
+          </section>
+        }
+
+        @if (v.warranty; as w) {
+          <section class="panel" aria-labelledby="wa-h">
+            <h2 id="wa-h"><mat-icon>verified_user</mat-icon>Warranty</h2>
+            <p>
+              <strong>{{ w.days }} days</strong>, until {{ w.endsAt | pkDate: 'date' }}
+            </p>
+            <p class="muted small">{{ w.terms }}</p>
+          </section>
+        }
+
+        @if (v.review; as r) {
+          <section class="panel" aria-labelledby="r-h">
+            <h2 id="r-h"><mat-icon>star</mat-icon>Review</h2>
+            <div class="stars static" [attr.aria-label]="r.rating + ' out of 5 stars'">
+              @for (n of [1, 2, 3, 4, 5]; track n) {
+                <mat-icon [class.on]="n <= r.rating" aria-hidden="true">star</mat-icon>
+              }
+            </div>
+            @if (r.comment) {
+              <p>“{{ r.comment }}”</p>
+            }
+            @if (r.status === 'HIDDEN') {
+              <p class="muted small">Hidden by moderation: {{ r.moderationNote }}</p>
+            }
+          </section>
+        }
+      </aside>
+    </div>
+  }
+</div>

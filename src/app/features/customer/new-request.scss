@@ -1,0 +1,81 @@
+.narrow {
+  max-width: 860px;
+}
+
+.stepper {
+  padding: 8px;
+}
+
+.cats {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+
+  legend {
+    font: var(--mat-sys-title-small);
+    margin-bottom: 8px;
+  }
+}
+
+.cat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--mat-sys-outline-variant);
+  cursor: pointer;
+
+  input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+    cursor: pointer;
+  }
+
+  .mat-icon {
+    color: var(--mat-sys-primary);
+  }
+
+  &:focus-within {
+    outline: 2px solid var(--mat-sys-primary);
+  }
+
+  &.on {
+    border-color: var(--mat-sys-primary);
+    background: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+  }
+}
+
+h3 {
+  font: var(--mat-sys-title-small);
+  margin: 8px 0;
+}
+
+.callout {
+  margin: 12px 0;
+}
+
+.saved {
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.review {
+  margin-bottom: 16px;
+}
+
+.mt {
+  margin-top: 12px;
+}

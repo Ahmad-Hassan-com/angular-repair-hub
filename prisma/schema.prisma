@@ -1,0 +1,733 @@
+// Target PostgreSQL schema for a server deployment (see docs/DEPLOYMENT.md).
+// The portfolio build does not use it: its in-browser backend stores the same entities
+// (src/app/core/models.ts) in localStorage. Money is stored as whole rupees (Int).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  STAFF
+  VENDOR
+  CUSTOMER
+  AGENT
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum VendorStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum JobStatus {
+  SUBMITTED
+  AWAITING_VENDOR
+  VENDOR_ACCEPTED
+  PICKUP_SCHEDULED
+  PICKUP_IN_PROGRESS
+  PHONE_COLLECTED
+  RECEIVED_AT_SHOP
+  INSPECTION_IN_PROGRESS
+  QUOTATION_SUBMITTED
+  AWAITING_APPROVAL
+  QUOTATION_APPROVED
+  REPAIR_IN_PROGRESS
+  WAITING_FOR_PARTS
+  REPAIR_COMPLETED
+  QUALITY_CHECKED
+  READY_FOR_DELIVERY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PAID
+  CLOSED
+  CANCELLED
+  PICKUP_FAILED
+  CUSTOMER_UNAVAILABLE
+  QUOTATION_REJECTED
+  UNREPAIRABLE
+  RETURNED_WITHOUT_REPAIR
+  DISPUTED
+  REFUNDED
+}
+
+enum JobOutcome {
+  PENDING
+  REPAIRED
+  NOT_REPAIRED
+}
+
+enum AssignmentMode {
+  FIRST_ACCEPT
+  ADMIN_ASSIGN
+}
+
+enum AssignmentState {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REVOKED
+}
+
+enum TaskKind {
+  PICKUP
+  DELIVERY
+}
+
+enum TaskStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum QuotationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum QuoteItemType {
+  PART
+  LABOR
+  DIAGNOSTIC
+  DELIVERY
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  CASH_TO_VENDOR
+  BANK_TRANSFER
+  ONLINE
+}
+
+enum Collector {
+  PLATFORM
+  VENDOR
+}
+
+enum TransactionKind {
+  PAYMENT
+  REFUND
+}
+
+enum TransactionStatus {
+  CONFIRMED
+  PENDING_VERIFICATION
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum Channel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+// ---------- Identity ----------
+
+model User {
+  id            String        @id @default(cuid())
+  role          Role
+  name          String
+  email         String
+  phone         String
+  phoneVerified Boolean       @default(false)
+  passwordHash  String
+  status        AccountStatus @default(ACTIVE)
+  failedLogins  Int           @default(0)
+  lockedUntil   DateTime?
+  lastLoginAt   DateTime?
+  demo          Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+
+  permissions   UserPermission[]
+  sessions      UserSession[]
+  customer      CustomerProfile?
+  vendor        VendorProfile?
+  customerJobs  RepairJob[]        @relation("CustomerJobs")
+  vendorJobs    RepairJob[]        @relation("VendorJobs")
+  tasks         PickupDeliveryTask[]
+  notifications Notification[]
+  files         UploadedFile[]
+  auditEntries  AuditLog[]
+
+  // Unique among live accounts; enforced with partial unique indexes in a migration:
+  // CREATE UNIQUE INDEX ON "User"(email) WHERE "deletedAt" IS NULL;
+  @@index([email])
+  @@index([phone])
+  @@index([role, status])
+}
+
+model Permission {
+  key   String           @id // e.g. "jobs.assign"
+  label String
+  users UserPermission[]
+}
+
+model UserPermission {
+  userId        String
+  permissionKey String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key])
+
+  @@id([userId, permissionKey])
+}
+
+model UserSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  userAgent String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model CustomerProfile {
+  userId    String            @id
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addresses CustomerAddress[]
+}
+
+model CustomerAddress {
+  id         String          @id @default(cuid())
+  customerId String
+  customer   CustomerProfile @relation(fields: [customerId], references: [userId], onDelete: Cascade)
+  line1      String
+  areaId     String
+  area       ServiceArea     @relation(fields: [areaId], references: [id])
+  city       String
+  landmark   String?
+}
+
+model VendorProfile {
+  userId          String         @id
+  user            User           @relation(fields: [userId], references: [id])
+  shopName        String
+  ownerName       String
+  addressLine1    String
+  areaId          String
+  city            String
+  status          VendorStatus   @default(PENDING)
+  statusReason    String?
+  available       Boolean        @default(true)
+  workingDays     Int[]
+  opensAt         String
+  closesAt        String
+  bio             String?
+  termsAcceptedAt DateTime
+  approvedAt      DateTime?
+  // Encrypted at rest with an application key (pgcrypto or KMS).
+  payoutBankName  String?
+  payoutTitle     String?
+  payoutIbanEnc   Bytes?
+
+  documents    VendorDocument[]
+  serviceAreas VendorServiceArea[]
+  specialties  VendorSpecialty[]
+  brands       VendorBrand[]
+  settlements  VendorSettlement[]
+
+  @@index([status, available])
+}
+
+model VendorDocument {
+  id         String        @id @default(cuid())
+  vendorId   String
+  vendor     VendorProfile @relation(fields: [vendorId], references: [userId], onDelete: Cascade)
+  kind       String
+  fileId     String
+  file       UploadedFile  @relation(fields: [fileId], references: [id])
+  uploadedAt DateTime      @default(now())
+}
+
+model VendorServiceArea {
+  vendorId String
+  areaId   String
+  vendor   VendorProfile @relation(fields: [vendorId], references: [userId], onDelete: Cascade)
+  area     ServiceArea   @relation(fields: [areaId], references: [id])
+
+  @@id([vendorId, areaId])
+  @@index([areaId])
+}
+
+model VendorSpecialty {
+  vendorId   String
+  categoryId String
+  vendor     VendorProfile  @relation(fields: [vendorId], references: [userId], onDelete: Cascade)
+  category   RepairCategory @relation(fields: [categoryId], references: [id])
+
+  @@id([vendorId, categoryId])
+  @@index([categoryId])
+}
+
+model VendorBrand {
+  vendorId String
+  brandId  String
+  vendor   VendorProfile @relation(fields: [vendorId], references: [userId], onDelete: Cascade)
+  brand    PhoneBrand    @relation(fields: [brandId], references: [id])
+
+  @@id([vendorId, brandId])
+}
+
+// ---------- Catalogue ----------
+
+model PhoneBrand {
+  id      String        @id @default(cuid())
+  name    String        @unique
+  active  Boolean       @default(true)
+  models  PhoneModel[]
+  vendors VendorBrand[]
+  jobs    RepairJob[]
+}
+
+model PhoneModel {
+  id      String      @id @default(cuid())
+  brandId String
+  brand   PhoneBrand  @relation(fields: [brandId], references: [id])
+  name    String
+  jobs    RepairJob[]
+
+  @@unique([brandId, name])
+}
+
+model RepairCategory {
+  id        String            @id @default(cuid())
+  name      String            @unique
+  icon      String
+  fromPrice Int
+  active    Boolean           @default(true)
+  vendors   VendorSpecialty[]
+  jobs      RepairJob[]
+}
+
+model ServiceArea {
+  id        String              @id @default(cuid())
+  name      String
+  city      String
+  active    Boolean             @default(true)
+  vendors   VendorServiceArea[]
+  addresses CustomerAddress[]
+  jobs      RepairJob[]
+
+  @@unique([city, name])
+}
+
+// ---------- Jobs ----------
+
+model RepairJob {
+  id                    String     @id @default(cuid())
+  ref                   String     @unique
+  customerId            String
+  customer              User       @relation("CustomerJobs", fields: [customerId], references: [id])
+  vendorId              String?
+  vendor                User?      @relation("VendorJobs", fields: [vendorId], references: [id])
+  brandId               String
+  brand                 PhoneBrand @relation(fields: [brandId], references: [id])
+  modelId               String
+  model                 PhoneModel @relation(fields: [modelId], references: [id])
+  categoryId            String
+  category              RepairCategory @relation(fields: [categoryId], references: [id])
+  description           String
+  pickupLine1           String
+  pickupAreaId          String
+  pickupArea            ServiceArea @relation(fields: [pickupAreaId], references: [id])
+  pickupCity            String
+  pickupLandmark        String?
+  deliveryLine1         String
+  deliveryAreaId        String
+  deliveryCity          String
+  preferredPickupDate   DateTime   @db.Date
+  preferredPickupWindow String
+  diagnosticConsent     Boolean
+  diagnosticFee         Int
+  status                JobStatus  @default(SUBMITTED)
+  outcome               JobOutcome @default(PENDING)
+  version               Int        @default(1)
+  promisedAt            DateTime?
+  collectedAt           DateTime?
+  cancelReason          String?
+  failureReason         String?
+  disputedFrom          JobStatus?
+  demo                  Boolean    @default(false)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  history      RepairStatusHistory[]
+  assignments  RepairAssignment[]
+  tasks        PickupDeliveryTask[]
+  conditions   DeviceConditionReport[]
+  inspections  RepairInspection[]
+  quotations   RepairQuotation[]
+  parts        RepairPartUsage[]
+  workLogs     RepairWorkLog[]
+  transactions PaymentTransaction[]
+  invoice      Invoice?
+  warranty     Warranty?
+  review       Review?
+  complaints   Complaint[]
+  photos       UploadedFile[]
+
+  @@index([status])
+  @@index([customerId, createdAt])
+  @@index([vendorId, status])
+  @@index([pickupAreaId, status])
+  @@index([createdAt])
+}
+
+/// Append-only. Revoke UPDATE/DELETE on this table for the app role.
+model RepairStatusHistory {
+  id      String     @id @default(cuid())
+  jobId   String
+  job     RepairJob  @relation(fields: [jobId], references: [id])
+  from    JobStatus?
+  to      JobStatus
+  actorId String? // null = system
+  note    String?
+  fileIds String[]
+  at      DateTime   @default(now())
+
+  @@index([jobId, at])
+}
+
+model RepairAssignment {
+  id          String          @id @default(cuid())
+  jobId       String
+  job         RepairJob       @relation(fields: [jobId], references: [id])
+  vendorId    String
+  mode        AssignmentMode
+  state       AssignmentState
+  offeredAt   DateTime        @default(now())
+  respondedAt DateTime?
+  expiresAt   DateTime?
+  assignedBy  String?
+  note        String?
+
+  // At most one ACCEPTED row per job (partial unique index in a migration):
+  // CREATE UNIQUE INDEX ON "RepairAssignment"("jobId") WHERE state = 'ACCEPTED';
+  @@index([jobId, state])
+  @@index([vendorId, state])
+  @@index([state, expiresAt])
+}
+
+model PickupDeliveryTask {
+  id            String     @id @default(cuid())
+  jobId         String
+  job           RepairJob  @relation(fields: [jobId], references: [id])
+  kind          TaskKind
+  status        TaskStatus @default(SCHEDULED)
+  assigneeId    String
+  assignee      User       @relation(fields: [assigneeId], references: [id])
+  addressLine1  String
+  areaId        String
+  city          String
+  scheduledDate DateTime   @db.Date
+  window        String
+  fee           Int
+  otpHash       String?
+  otpSalt       String?
+  otpExpiresAt  DateTime?
+  otpAttempts   Int        @default(0)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  failureReason String?
+  notes         String?
+  evidenceIds   String[]
+  // Reserved for GPS tracking; not populated yet.
+  lastLat       Float?
+  lastLng       Float?
+  lastLocatedAt DateTime?
+  createdAt     DateTime   @default(now())
+  events        TaskEvent[]
+
+  @@index([assigneeId, status])
+  @@index([jobId, kind])
+}
+
+model TaskEvent {
+  id      String             @id @default(cuid())
+  taskId  String
+  task    PickupDeliveryTask @relation(fields: [taskId], references: [id])
+  status  TaskStatus
+  actorId String
+  note    String?
+  at      DateTime           @default(now())
+}
+
+model DeviceConditionReport {
+  id                String    @id @default(cuid())
+  jobId             String
+  job               RepairJob @relation(fields: [jobId], references: [id])
+  stage             String
+  physicalCondition String
+  existingDamage    String
+  accessories       String[]
+  imeiEnc           Bytes? // encrypted; shown only to the job's vendor and admins
+  powersOn          Boolean
+  photoIds          String[]
+  recordedBy        String
+  at                DateTime  @default(now())
+}
+
+model RepairInspection {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            RepairJob @relation(fields: [jobId], references: [id])
+  findings       String
+  proposedRepair String
+  repairable     Boolean
+  recordedBy     String
+  at             DateTime  @default(now())
+}
+
+model RepairQuotation {
+  id                  String          @id @default(cuid())
+  jobId               String
+  job                 RepairJob       @relation(fields: [jobId], references: [id])
+  version             Int
+  discount            Int             @default(0)
+  taxRatePct          Decimal         @db.Decimal(5, 2)
+  estimatedCompletion DateTime
+  warrantyDays        Int
+  notes               String?
+  commissionPct       Decimal         @db.Decimal(5, 2)
+  commissionFixed     Int
+  status              QuotationStatus @default(PENDING)
+  createdBy           String
+  createdAt           DateTime        @default(now())
+  respondedAt         DateTime?
+  responseNote        String?
+  items               QuotationItem[]
+  invoices            Invoice[]
+
+  @@unique([jobId, version])
+}
+
+model QuotationItem {
+  id          String          @id @default(cuid())
+  quotationId String
+  quotation   RepairQuotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  type        QuoteItemType
+  description String
+  quantity    Int
+  unitPrice   Int
+}
+
+model RepairPart {
+  id         String            @id @default(cuid())
+  name       String
+  partNumber String?           @unique
+  usages     RepairPartUsage[]
+}
+
+model RepairPartUsage {
+  id         String      @id @default(cuid())
+  jobId      String
+  job        RepairJob   @relation(fields: [jobId], references: [id])
+  partId     String?
+  part       RepairPart? @relation(fields: [partId], references: [id])
+  partName   String
+  quantity   Int
+  unitCost   Int
+  recordedBy String
+  at         DateTime    @default(now())
+}
+
+model RepairWorkLog {
+  id         String    @id @default(cuid())
+  jobId      String
+  job        RepairJob @relation(fields: [jobId], references: [id])
+  kind       String
+  note       String
+  fileIds    String[]
+  recordedBy String
+  at         DateTime  @default(now())
+}
+
+// ---------- Money ----------
+
+/// Append-only ledger. Only status PENDING_VERIFICATION -> CONFIRMED may change.
+model PaymentTransaction {
+  id             String            @id @default(cuid())
+  jobId          String
+  job            RepairJob         @relation(fields: [jobId], references: [id])
+  kind           TransactionKind
+  method         PaymentMethod
+  collector      Collector
+  amount         Int
+  reference      String?
+  idempotencyKey String            @unique
+  status         TransactionStatus
+  recordedBy     String
+  verifiedBy     String?
+  reason         String?
+  at             DateTime          @default(now())
+
+  @@index([jobId])
+  @@index([at])
+  @@index([status])
+}
+
+model VendorSettlement {
+  id         String        @id @default(cuid())
+  vendorId   String
+  vendor     VendorProfile @relation(fields: [vendorId], references: [userId])
+  amount     Int // positive: paid to vendor; negative: collected from vendor
+  reference  String
+  periodFrom DateTime
+  periodTo   DateTime
+  createdBy  String
+  at         DateTime      @default(now())
+
+  @@index([vendorId, at])
+}
+
+model Invoice {
+  id          String          @id @default(cuid())
+  jobId       String          @unique
+  job         RepairJob       @relation(fields: [jobId], references: [id])
+  number      String          @unique
+  quotationId String?
+  quotation   RepairQuotation? @relation(fields: [quotationId], references: [id])
+  issuedAt    DateTime        @default(now())
+}
+
+model Warranty {
+  id       String    @id @default(cuid())
+  jobId    String    @unique
+  job      RepairJob @relation(fields: [jobId], references: [id])
+  days     Int
+  terms    String
+  startsAt DateTime
+  endsAt   DateTime
+}
+
+// ---------- Feedback, support, notifications ----------
+
+model Review {
+  id             String    @id @default(cuid())
+  jobId          String    @unique // one review per job
+  job            RepairJob @relation(fields: [jobId], references: [id])
+  customerId     String
+  vendorId       String
+  rating         Int // 1-5, CHECK constraint in migration
+  comment        String
+  status         String    @default("PUBLISHED")
+  moderationNote String?
+  at             DateTime  @default(now())
+
+  @@index([vendorId, status])
+}
+
+model Complaint {
+  id         String           @id @default(cuid())
+  jobId      String?
+  job        RepairJob?       @relation(fields: [jobId], references: [id])
+  raisedBy   String
+  subject    String
+  isDispute  Boolean          @default(false)
+  status     ComplaintStatus  @default(OPEN)
+  resolution String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  messages   SupportMessage[]
+
+  @@index([status])
+}
+
+model SupportMessage {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  authorId    String
+  body        String
+  at          DateTime  @default(now())
+}
+
+model Notification {
+  id       String        @id @default(cuid())
+  userId   String
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title    String
+  body     String
+  link     String?
+  read     Boolean       @default(false)
+  at       DateTime      @default(now())
+  delivery DeliveryLog[]
+
+  @@index([userId, read, at])
+}
+
+model DeliveryLog {
+  id             String       @id @default(cuid())
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  channel        Channel
+  to             String
+  status         String // SENT | PROVIDER_NOT_CONFIGURED | FAILED
+  at             DateTime     @default(now())
+}
+
+model UploadedFile {
+  id         String           @id @default(cuid())
+  ownerId    String
+  owner      User             @relation(fields: [ownerId], references: [id])
+  storageKey String           @unique // object key in the private bucket
+  mime       String
+  size       Int
+  visibility String // PRIVATE | JOB
+  jobId      String?
+  job        RepairJob?       @relation(fields: [jobId], references: [id])
+  at         DateTime         @default(now())
+  documents  VendorDocument[]
+}
+
+/// Append-only.
+model AuditLog {
+  id       String   @id @default(cuid())
+  actorId  String?
+  actor    User?    @relation(fields: [actorId], references: [id])
+  action   String
+  entity   String
+  entityId String
+  detail   String?
+  at       DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([at])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
