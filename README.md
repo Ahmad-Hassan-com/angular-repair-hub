@@ -1,6 +1,6 @@
 # Repair Hub: Mobile Repair & Delivery Platform (Angular)
 
-**Live demo: _coming soon_**. Sign in with any demo account; the password is `Demo@1234`.
+**Live demo: https://repair-hub-beta.vercel.app**. Sign in with any demo account; the password is `Demo@1234`.
 
 | Role | Email |
 |---|---|
